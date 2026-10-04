@@ -1,7 +1,8 @@
-import { Game } from './game';
+import { Game } from './rules';
 import { initAudio, isMuted, setMuted, sfx } from './audio';
+import type { Scene3D } from './scene3d';
 
-export function bindInput(game: Game, muteBtn: HTMLButtonElement) {
+export function bindInput(game: Game, scene3d: Scene3D, muteBtn: HTMLButtonElement, pauseBtn: HTMLButtonElement) {
   const press = (el: HTMLElement, onDown: () => void, onUp?: () => void) => {
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -53,12 +54,20 @@ export function bindInput(game: Game, muteBtn: HTMLButtonElement) {
   const updateMute = () => {
     muteBtn.textContent = isMuted() ? '音效 OFF' : '音效 ON';
   };
+  const updatePause = () => {
+    pauseBtn.textContent = game.paused ? 'RESUME' : 'PAUSE';
+  };
   muteBtn.addEventListener('click', () => {
     initAudio();
     setMuted(!isMuted());
     updateMute();
   });
+  pauseBtn.addEventListener('click', () => {
+    game.togglePause();
+    updatePause();
+  });
   updateMute();
+  updatePause();
 
   const keys: Record<string, () => void> = {};
   const upKeys: Record<string, () => void> = {};
@@ -79,7 +88,10 @@ export function bindInput(game: Game, muteBtn: HTMLButtonElement) {
   keys['ShiftLeft'] = () => game.nudge('L');
   keys['ShiftRight'] = () => game.nudge('R');
   keys['ArrowUp'] = () => game.nudge('U');
-  keys['KeyP'] = () => game.togglePause();
+  keys['KeyP'] = () => {
+    game.togglePause();
+    updatePause();
+  };
   keys['KeyM'] = () => {
     initAudio();
     setMuted(!isMuted());
@@ -106,4 +118,6 @@ export function bindInput(game: Game, muteBtn: HTMLButtonElement) {
   window.addEventListener('contextmenu', (e) => {
     if ((e.target as HTMLElement).closest('#deck')) e.preventDefault();
   });
+
+  void scene3d;
 }

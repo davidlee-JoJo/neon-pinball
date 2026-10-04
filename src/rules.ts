@@ -1,29 +1,26 @@
-﻿import { Container, Sprite } from 'pixi.js';
 import * as planck from 'planck';
 import {
-  BALL_R, BALL_SAVE_S, CHARGE_RATE, LAUNCH_V_MIN, LAUNCH_V_MAX,
-  PPU, SC, TILT_MAX, TILT_WINDOW_S, PHYS_DT
+  BALL_SAVE_S, CHARGE_RATE, LAUNCH_V_MIN, LAUNCH_V_MAX,
+  PPU, SC, TILT_MAX, TILT_WINDOW_S, PHYS_DT,
+  FEVER_HITS, FEVER_WINDOW_S, FEVER_TIME_S, FEVER_MULT,
+  SPINNER_DOUBLE_S, COMBO_WINDOW_S, COMBO_BONUS, SKILL_WINDOW_S
 } from './config';
 import * as L from './layout';
 import * as ph from './physics';
-import { Table } from './build';
+import { Table } from './table';
 import { Bumper, Sling } from './entities';
 import { on } from './events';
-import { Lamp, Particles, Trail, ballTexture, glowTexture, shake } from './fx';
-import { DMD } from './dmd';
+import { DMD3D } from './dmd3d';
 import { sfx, startMusic } from './audio';
 
-interface Ball {
+export interface Ball {
   body: planck.Body;
-  view: Container;
-  glow: Sprite;
-  trail: Trail;
   captured: boolean;
 }
 
-interface Task {
-  at: number;
-  fn: () => void;
+export interface Fx {
+  burst(x: number, y: number, color: string, n?: number, speed?: number): void;
+  shake(a: number): void;
 }
 
 export interface Hud {
@@ -35,6 +32,11 @@ export interface Hud {
 }
 
 const fmtScore = (n: number) => n.toLocaleString('en-US');
+const cssC = {
+  orange: '#ff9a3d', magenta: '#ff2fd6', yellow: '#ffe94a', cyan: '#00eaff', green: '#4dff88', red: '#ff4757', white: '#ffffff'
+};
+
+interface Task { at: number; fn: () => void; }
 
 export class Game {
   state: 'attract' | 'ready' | 'play' | 'bonus' | 'over' = 'attract';
@@ -59,40 +61,36 @@ export class Game {
   tiltTimes: number[] = [];
   standupLit = [false, false];
   standupRounds = 0;
+  spinnerDoubleUntil = 0;
+  feverHits: number[] = [];
+  feverUntil = 0;
+  comboTimes: { at: number; n: number }[] = [];
+  combo = 0;
   nextExtra = SC.extraBallScore;
   high = 0;
   time = 0;
   charging = false;
   charge = 0;
-  private balls: Ball[] = [];
+  balls: Ball[] = [];
   private tasks: Task[] = [];
   private acc = 0;
-  private lamps: Lamp[] = [];
   private bonusTotal = 0;
   private bonusElapsed = 0;
   private bonusAdded = 0;
   private overAt = 0;
   private hudDirty = true;
+  private saving = false;
 
   constructor(
     private table: Table,
-    private dmd: DMD,
+    private dmd: DMD3D,
     private hud: Hud,
-    private dyn: Container,
-    private fxLayer: Container,
-    private particles: Particles
+    private fx: Fx
   ) {
-    this.high = Math.max(0, ...(JSON.parse(localStorage.getItem('np-highscores') || '[]') as number[]));
-    this.lamps = [
-      ...table.bumpers.map((b) => b.lamp),
-      ...table.slings.map((s) => s.lamp),
-      ...table.standups.items.map((i) => i.lamp),
-      ...Object.values(table.rollovers).map((r) => r.lamp),
-      table.saucer.lamp
-    ];
+    this.high = Math.max(0, ...(JSON.parse(localStorage.getItem('np3d-highscores') || '[]') as number[]));
     table.standups.reset();
     on((e) => this.handle(e));
-    this.dmd.setScroll('NEON PINBALL 霓虹彈珠  ★  按 LAUNCH 發射鈕開始新遊戲 PRESS LAUNCH TO START ★');
+    this.dmd.setScroll('NEON PINBALL 3D 霓虹彈珠  ★  按 LAUNCH 開始新遊戲 PRESS LAUNCH TO START ★');
     this.hud.high.textContent = fmtScore(this.high);
   }
 
@@ -114,6 +112,36 @@ export class Game {
         this.msg('EXTRA BALL 加球!', 2.5);
         sfx.extraBall();
       }
+    }
+  }
+
+  private bumpCombo() {
+    const now = this.time;
+    this.comboTimes = this.comboTimes.filter((c) => c.at > now - COMBO_WINDOW_S * 4);
+    const last = this.comboTimes[this.comboTimes.length - 1];
+    if (last && now - last.at < COMBO_WINDOW_S) {
+      last.n++;
+      last.at = now;
+      this.combo = last.n;
+    } else {
+      this.combo = 1;
+      this.comboTimes.push({ at: now, n: 1 });
+    }
+    if (this.combo >= 3) {
+      const bonus = Math.min(10, this.combo) * COMBO_BONUS;
+      this.addScore(bonus);
+      this.msg(`COMBO ×${this.combo}! +${fmtScore(bonus)}`, 0.9);
+    }
+  }
+
+  private checkFever() {
+    this.feverHits = this.feverHits.filter((t) => t > this.time - FEVER_WINDOW_S);
+    if (this.time < this.feverUntil) return;
+    if (this.feverHits.length >= FEVER_HITS) {
+      this.feverUntil = this.time + FEVER_TIME_S;
+      this.feverHits = [];
+      this.msg(`BUMPER FEVER! ×${FEVER_MULT}`, 2.5, true);
+      sfx.jackpot();
     }
   }
 
@@ -155,31 +183,13 @@ export class Game {
 
   private spawnBall(x: number, y: number): Ball {
     const body = ph.makeBall(x, y);
-    const view = new Container();
-    const spr = new Sprite(ballTexture());
-    spr.anchor.set(0.5);
-    spr.width = BALL_R * 2;
-    spr.height = BALL_R * 2;
-    const glow = new Sprite(glowTexture('#bfe3ff'));
-    glow.anchor.set(0.5);
-    glow.blendMode = 'add';
-    glow.width = BALL_R * 5;
-    glow.height = BALL_R * 5;
-    glow.alpha = 0.5;
-    view.addChild(spr);
-    this.dyn.addChild(glow);
-    this.dyn.addChild(view);
-    const trail = new Trail(this.fxLayer);
-    const ball: Ball = { body, view, glow, trail, captured: false };
+    const ball: Ball = { body, captured: false };
     this.balls.push(ball);
     return ball;
   }
 
   private removeBall(b: Ball) {
     ph.world.destroyBody(b.body);
-    b.view.destroy();
-    b.glow.destroy();
-    b.trail.hide();
     const i = this.balls.indexOf(b);
     if (i >= 0) this.balls.splice(i, 1);
   }
@@ -213,31 +223,10 @@ export class Game {
     }
 
     this.table.update(dt, this.balls.map((b) => b.body));
-
-    for (const b of this.balls) {
-      const p = b.body.getPosition();
-      const x = p.x * PPU;
-      const y = p.y * PPU;
-      if (b.captured || !b.body.isActive()) {
-        b.view.visible = false;
-        b.glow.visible = false;
-        b.trail.hide();
-      } else {
-        b.view.visible = true;
-        b.glow.visible = true;
-        b.view.position.set(x, y);
-        b.glow.position.set(x, y);
-        b.trail.push(x, y);
-      }
-    }
-
-    this.checkDrains();
     this.updateState(dt);
     this.updateLamps();
 
-    for (const l of this.lamps) l.update(dt);
-    this.particles.update(dt);
-    shake.update(dt);
+    this.checkDrains();
 
     this.dmd.setScore(this.state === 'bonus' ? this.score + this.bonusAdded : this.score);
     this.dmd.update(this.time);
@@ -255,12 +244,12 @@ export class Game {
     switch (this.state) {
       case 'attract': {
         const t = this.time * 1.5;
-        this.table.bumpers.forEach((b, i) => b.lamp.set(0.12 + 0.55 * Math.max(0, Math.sin(t * 2 + i * 2.1))));
+        this.table.bumpers.forEach((b, i) => b.pulse = 0.5 + 0.5 * Math.sin(t * 2 + i * 2.1));
         const chase = Math.floor(t) % 3;
         Object.values(this.table.rollovers).forEach((r, i) => {
-          if (r.id.startsWith('lane')) r.lamp.set(i % 3 === chase ? 0.8 : 0.1);
+          if (r.id.startsWith('lane')) r.setLit(i % 3 === chase);
         });
-        this.table.saucer.lamp.set(Math.sin(t * 3) > 0.4 ? 0.8 : 0.12);
+        this.table.saucer.glowLevel = Math.sin(t * 3) > 0.4 ? 0.8 : 0.12;
         break;
       }
       case 'ready': {
@@ -269,9 +258,8 @@ export class Game {
       }
       case 'play': {
         this.tiltTimes = this.tiltTimes.filter((t) => t > this.time - TILT_WINDOW_S);
-        if (this.skillActive && this.time > this.skillUntil) {
-          this.skillActive = false;
-        }
+        if (this.skillActive && this.time > this.skillUntil) this.skillActive = false;
+        if (this.time > this.feverUntil) this.feverHits = [];
         const onPlunger = this.ballOnPlunger();
         if (onPlunger) {
           this.dmd.setInfo('按住 LAUNCH 蓄力發射');
@@ -302,7 +290,7 @@ export class Game {
       case 'over': {
         if (this.time > this.overAt) {
           this.state = 'attract';
-          this.dmd.setScroll('NEON PINBALL 霓虹彈珠  ★  按 LAUNCH 發射鈕開始新遊戲 PRESS LAUNCH TO START ★');
+          this.dmd.setScroll('NEON PINBALL 3D 霓虹彈珠  ★  按 LAUNCH 再來一局 PRESS LAUNCH TO PLAY AGAIN ★');
         }
         break;
       }
@@ -311,17 +299,19 @@ export class Game {
 
   private updateLamps() {
     const t = this.table;
-    t.saucer.lamp.set(
-      this.inMultiball ? 0.55 + 0.45 * Math.sin(this.time * 10) : this.lockLit ? 0.4 + 0.35 * Math.sin(this.time * 6) : 0.15
-    );
-    for (const s of t.standups.items) {
-      if (!s.lit) s.lamp.set(0.12);
-    }
+    t.saucer.glowLevel = this.inMultiball
+      ? 0.55 + 0.45 * Math.sin(this.time * 10)
+      : this.lockLit
+        ? 0.4 + 0.35 * Math.sin(this.time * 6)
+        : this.state === 'attract' ? t.saucer.glowLevel : 0.15;
     Object.values(t.rollovers).forEach((r) => {
       if (r.id.startsWith('lane')) {
         const i = ['P', 'I', 'N'].indexOf(r.id.slice(4));
         if (this.state === 'play' || this.state === 'ready') {
-          r.lamp.set(this.laneLit[i] ? 0.9 : this.skillActive && i === this.skillLane ? 0.5 + 0.4 * Math.sin(this.time * 8) : 0.12);
+          r.setLit(
+            this.laneLit[i] ||
+            (this.skillActive && i === this.skillLane && Math.floor(this.time * 6) % 2 === 0)
+          );
         }
       }
     });
@@ -334,7 +324,7 @@ export class Game {
       if (b.body.getPosition().y * PPU > L.DRAIN_Y) {
         this.removeBall(b);
         sfx.drain();
-        shake.add(3);
+        this.fx.shake(3);
       }
     }
     if (this.state !== 'play') return;
@@ -347,9 +337,12 @@ export class Game {
       return;
     }
     if (this.time < this.ballSaveUntil) {
+      if (this.saving) return;
+      this.saving = true;
       this.msg('BALL SAVED 球救援!', 1.6);
       sfx.ballSave();
       this.after(0.6, () => {
+        this.saving = false;
         this.spawnBall(L.SPAWN.x, L.SPAWN.y);
         this.after(0.5, () => this.launch(0.65));
       });
@@ -359,12 +352,14 @@ export class Game {
   }
 
   private endOfBall() {
+    this.saving = false;
     for (const b of [...this.balls]) {
       if (b.captured) this.removeBall(b);
     }
     this.table.saucer.takeCaptured();
     this.state = 'bonus';
-    this.bonusTotal = this.tilt ? 0 : this.mult * SC.bonusPer;
+    const lanes = this.laneCompletions * 5000;
+    this.bonusTotal = this.tilt ? 0 : this.mult * SC.bonusPer + lanes;
     this.bonusElapsed = 0;
     this.bonusAdded = 0;
     if (this.tilt) {
@@ -399,10 +394,10 @@ export class Game {
   private gameOver() {
     this.state = 'over';
     this.overAt = this.time + 6;
-    const hs = JSON.parse(localStorage.getItem('np-highscores') || '[]') as number[];
+    const hs = JSON.parse(localStorage.getItem('np3d-highscores') || '[]') as number[];
     hs.push(this.score);
     hs.sort((a, b) => b - a);
-    localStorage.setItem('np-highscores', JSON.stringify(hs.slice(0, 5)));
+    localStorage.setItem('np3d-highscores', JSON.stringify(hs.slice(0, 5)));
     this.high = hs[0] ?? this.high;
     this.hud.high.textContent = fmtScore(this.high);
     this.hudDirty = true;
@@ -411,12 +406,8 @@ export class Game {
   }
 
   newGame() {
-    for (const b of this.balls) {
-      ph.world.destroyBody(b.body);
-      b.view.destroy();
-      b.glow.destroy();
-      b.trail.hide();
-    }
+    this.saving = false;
+    for (const b of this.balls) ph.world.destroyBody(b.body);
     this.balls = [];
     this.tasks = [];
     this.score = 0;
@@ -434,7 +425,12 @@ export class Game {
     this.tiltTimes = [];
     this.standupLit = [false, false];
     this.standupRounds = 0;
-    this.standupsReset();
+    this.table.standups.reset();
+    this.spinnerDoubleUntil = 0;
+    this.feverHits = [];
+    this.feverUntil = 0;
+    this.comboTimes = [];
+    this.combo = 0;
     this.nextExtra = SC.extraBallScore;
     this.charging = false;
     this.charge = 0;
@@ -447,11 +443,6 @@ export class Game {
     this.msg('第 1 球 BALL 1', 2);
     sfx.gameStart();
     startMusic();
-  }
-
-  private standupsReset() {
-    this.standupLit = [false, false];
-    this.table.standups.reset();
   }
 
   pressFlipper(side: 'L' | 'R') {
@@ -497,11 +488,11 @@ export class Game {
     const m = ball.body.getMass();
     ball.body.applyLinearImpulse(ph.vec(0, -v * m), ball.body.getPosition(), true);
     sfx.launch(power);
-    shake.add(2 + power * 5);
+    this.fx.shake(2 + power * 5);
     this.state = 'play';
     this.ballSaveUntil = this.time + BALL_SAVE_S;
     this.skillActive = true;
-    this.skillUntil = this.time + 7;
+    this.skillUntil = this.time + SKILL_WINDOW_S;
     this.skillLane = Math.floor(Math.random() * 3);
     this.msg(`技巧射門: ${['P', 'I', 'N'][this.skillLane]} 道`, 2.2);
     if (this.multiballReady) {
@@ -531,11 +522,11 @@ export class Game {
       this.table.flippers.R.forceDown();
       this.msg('TILT !! 犯規', 3, true);
       sfx.tilt();
-      shake.add(10);
+      this.fx.shake(10);
       return;
     }
     sfx.nudge();
-    shake.add(3.5);
+    this.fx.shake(3.5);
     for (const b of this.activeBalls()) {
       const m = b.body.getMass();
       const imp = dir === 'L' ? ph.vec(-3.6 * m, 0) : dir === 'R' ? ph.vec(3.6 * m, 0) : ph.vec(0, -3.6 * m);
@@ -552,36 +543,43 @@ export class Game {
     switch (e.type) {
       case 'bumper': {
         if (this.state !== 'play') break;
-        this.addScore(Math.min(SC.bumperMax, SC.bumper + this.laneCompletions * SC.bumperStep));
+        this.feverHits.push(this.time);
+        this.checkFever();
+        const fever = this.time < this.feverUntil;
+        this.addScore(Math.min(SC.bumperMax, SC.bumper + this.laneCompletions * SC.bumperStep) * (fever ? FEVER_MULT : 1));
+        this.bumpCombo();
         sfx.bumper(e.index as number);
-        this.particles.burst(e.x as number, e.y as number, '#ff9a3d', 10, 150, 12);
-        shake.add(1.6);
+        this.fx.burst(e.x as number, e.y as number, cssC.orange, 10, 1.4);
+        this.fx.shake(1.6);
         break;
       }
       case 'sling': {
         if (this.state !== 'play') break;
         this.addScore(SC.sling);
+        this.bumpCombo();
         sfx.sling();
-        this.particles.burst(e.x as number, e.y as number, '#ff2fd6', 8, 130, 10);
-        shake.add(1.8);
+        this.fx.burst(e.x as number, e.y as number, cssC.magenta, 8, 1.2);
+        this.fx.shake(1.8);
         break;
       }
       case 'drop': {
         if (this.state !== 'play') break;
         this.addScore(SC.drop);
+        this.bumpCombo();
         sfx.drop();
         const d = L.DROPS[e.index as number];
-        this.particles.burst(d.x, d.y, '#ffe94a', 8, 120, 10);
+        this.fx.burst(d.x, d.y, cssC.yellow, 8, 1.1);
         break;
       }
       case 'dropComplete': {
         if (this.state !== 'play') break;
         this.addScore(SC.dropComplete);
+        this.spinnerDoubleUntil = this.time + SPINNER_DOUBLE_S;
         if (!this.inMultiball) {
           this.lockLit = true;
           this.msg('鎖球已點亮 LOCK LIT — 射入中央 LOCK', 2.5);
         } else {
-          this.msg('+15000 全倒!', 1.5);
+          this.msg('+25000 全倒!', 1.5);
         }
         sfx.lock();
         break;
@@ -589,6 +587,7 @@ export class Game {
       case 'standup': {
         if (this.state !== 'play') break;
         this.addScore(SC.standup);
+        this.bumpCombo();
         sfx.standup();
         const i = e.index as number;
         this.standupLit[i] = true;
@@ -596,13 +595,14 @@ export class Game {
         if (this.standupLit.every(Boolean)) {
           this.addScore(SC.standupPair);
           this.standupRounds++;
-          this.standupsReset();
-          if (this.standupRounds >= 2 && this.extraBalls < 2) {
+          this.standupLit = [false, false];
+          this.table.standups.reset();
+          if (this.standupRounds % 2 === 0 && this.extraBalls < 2) {
             this.extraBalls++;
             this.msg('EXTRA BALL 加球!', 2.5);
             sfx.extraBall();
           } else {
-            this.msg('+3000', 1.2);
+            this.msg('+10000', 1.2);
           }
         }
         break;
@@ -613,7 +613,7 @@ export class Game {
           const idx = ['P', 'I', 'N'].indexOf(id.slice(4));
           if (this.state === 'play' && this.skillActive && idx === this.skillLane) {
             this.addScore(SC.skill);
-            this.msg('SKILL SHOT! +25000', 2);
+            this.msg('SKILL SHOT! +50000', 2);
             sfx.skill();
             this.skillActive = false;
           } else if (this.state === 'play') {
@@ -637,20 +637,20 @@ export class Game {
             }
           }
         } else if (this.state === 'play') {
-          this.addScore(id === 'outL' ? SC.outlane : SC.inlane);
+          this.addScore(SC.inlane);
           sfx.lane();
         }
         break;
       }
       case 'spinner': {
         if (this.state !== 'play') break;
-        this.addScore(SC.spinnerRev);
+        this.addScore(SC.spinnerRev * (this.time < this.spinnerDoubleUntil ? 2 : 1));
         sfx.spinner();
         break;
       }
       case 'spinnerTick': {
         if (this.state !== 'play') break;
-        this.addScore(SC.spinnerTick);
+        this.addScore(SC.spinnerTick * (this.time < this.spinnerDoubleUntil ? 2 : 1));
         break;
       }
       case 'saucer': {
@@ -682,14 +682,14 @@ export class Game {
           this.table.saucer.capture(ball);
           const b = this.balls.find((x) => x.body === ball);
           if (b) b.captured = true;
-          const gained = this.inMultiball ? SC.jackpot : SC.saucer;
+          const jackpot = this.inMultiball;
           this.after(0.9, () => {
-            this.addScore(gained);
-            if (this.inMultiball) {
-              this.msg('JACKPOT! +50000', 2);
+            this.addScore(jackpot ? SC.jackpot : SC.saucer);
+            if (jackpot) {
+              this.msg('JACKPOT! +100000', 2);
               sfx.jackpot();
-              this.particles.burst(L.SAUCER.x, L.SAUCER.y, '#ffe94a', 30, 240, 16);
-              shake.add(6);
+              this.fx.burst(L.SAUCER.x, L.SAUCER.y, cssC.yellow, 30, 2.2);
+              this.fx.shake(6);
             } else {
               this.msg(`+${fmtScore(SC.saucer * this.mult)}`, 1.2);
               sfx.saucerOut();

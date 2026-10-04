@@ -16,6 +16,9 @@ page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 page.on('console', (m) => {
   if (m.type() === 'error') errors.push('CONSOLE: ' + m.text());
 });
+page.on('requestfailed', (r) => {
+  if (!r.url().includes('favicon')) errors.push('REQFAIL: ' + r.url());
+});
 
 await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
 await new Promise((r) => setTimeout(r, 2500));
@@ -29,7 +32,12 @@ await new Promise((r) => setTimeout(r, 800));
 const state1 = await page.evaluate(() => window.__game.state);
 console.log('state after newGame:', state1);
 
-await page.mouse.move(280, 900);
+// click the actual launch button center
+const rect = await page.evaluate(() => {
+  const b = document.getElementById('btn-launch').getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+});
+await page.mouse.move(rect.x, rect.y);
 await page.mouse.down();
 await new Promise((r) => setTimeout(r, 900));
 await page.mouse.up();
@@ -51,7 +59,7 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 3000));
 const s2 = await page.evaluate(() => {
   const g = window.__game;
-  return { state: g.state, score: g.score, balls: g.balls.length, ballY: g.balls[0]?.body.getPosition().y * 20 };
+  return { state: g.state, score: g.score, balls: g.balls.length };
 });
 console.log('after 3s play:', JSON.stringify(s2));
 await page.screenshot({ path: 'shot-play2.png' });

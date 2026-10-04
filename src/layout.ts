@@ -18,10 +18,20 @@ const D = Math.PI / 180;
 export const WALL_OUTER: Pt[] = [
   [15, 780],
   [15, 250],
-  ...arcPts(ARC_R, Math.PI, 0, 30),
+  ...arcPts(ARC_R, Math.PI, 2 * Math.PI, 30),
   [465, 800],
   [431, 800],
-  [431, 250],
+  [431, 380]
+];
+
+// Shooter-lane exit guide: carries the ball up-left along its underside and
+// hands it to the inner arc, so it can never fall back into the lane.
+export const LANE_GUIDE: Pt[] = [
+  [465, 430],
+  [460, 395],
+  [452, 355],
+  [443, 320],
+  [435, 285],
   ...arcPts(INNER_R, 0, -35 * D, 10)
 ];
 

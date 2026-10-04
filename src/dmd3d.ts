@@ -2,7 +2,8 @@ const DOT = 4;
 const W = 128;
 const H = 32;
 
-export class DMD {
+export class DMD3D {
+  readonly canvas: HTMLCanvasElement;
   private vctx: CanvasRenderingContext2D;
   private octx: CanvasRenderingContext2D;
   private bg: HTMLCanvasElement;
@@ -12,10 +13,11 @@ export class DMD {
   private scroll: string | null = null;
   private scrollX = W + 4;
 
-  constructor(canvas: HTMLCanvasElement) {
-    canvas.width = W * DOT;
-    canvas.height = H * DOT;
-    this.vctx = canvas.getContext('2d')!;
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = W * DOT;
+    this.canvas.height = H * DOT;
+    this.vctx = this.canvas.getContext('2d')!;
     const off = document.createElement('canvas');
     off.width = W;
     off.height = H;
@@ -37,15 +39,11 @@ export class DMD {
   }
 
   setScore(n: number) {
-    if (n !== this.scoreShown) {
-      this.scoreShown = n;
-    }
+    this.scoreShown = n;
   }
 
   setInfo(t: string) {
-    if (t !== this.info) {
-      this.info = t;
-    }
+    this.info = t;
   }
 
   showMsg(text: string, dur = 2, blink = false) {

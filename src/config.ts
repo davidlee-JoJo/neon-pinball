@@ -31,27 +31,36 @@ export const LAUNCH_V_MAX = 82;
 export const CHARGE_RATE = 0.85;
 
 export const SC = {
-  bumper: 150,
+  bumper: 500,
   bumperStep: 100,
-  bumperMax: 600,
-  sling: 75,
-  lane: 1000,
-  laneComplete: 5000,
-  spinnerRev: 100,
-  spinnerTick: 25,
-  drop: 750,
-  dropComplete: 15000,
-  standup: 500,
-  standupPair: 3000,
-  saucer: 2500,
+  bumperMax: 1500,
+  sling: 250,
+  lane: 1500,
+  laneComplete: 10000,
+  spinnerRev: 500,
+  spinnerTick: 125,
+  drop: 2500,
+  dropComplete: 25000,
+  standup: 1000,
+  standupPair: 10000,
+  saucer: 15000,
   lock: 10000,
-  jackpot: 50000,
-  skill: 25000,
-  inlane: 100,
-  outlane: 100,
+  jackpot: 100000,
+  skill: 50000,
+  inlane: 500,
+  outlane: 500,
   bonusPer: 10000,
-  extraBallScore: 500000
+  extraBallScore: 2000000
 };
+
+export const FEVER_HITS = 8;
+export const FEVER_WINDOW_S = 4;
+export const FEVER_TIME_S = 10;
+export const FEVER_MULT = 3;
+export const SPINNER_DOUBLE_S = 20;
+export const COMBO_WINDOW_S = 1.2;
+export const COMBO_BONUS = 5000;
+export const SKILL_WINDOW_S = 6;
 
 export const C = {
   cyan: 0x00eaff,
