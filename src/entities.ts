@@ -1,5 +1,5 @@
 ﻿import * as planck from 'planck';
-import { FLIPPER_SPEED, FLIPPER_TORQUE, PPU } from './config';
+import { FLIPPER_SPEED, FLIPPER_RETURN, FLIPPER_TORQUE, PPU } from './config';
 import * as L from './layout';
 import * as ph from './physics';
 import { emit } from './events';
@@ -42,8 +42,10 @@ export class Flipper {
     this.joint = ph.world.createJoint(new planck.RevoluteJoint(
       {
         enableLimit: true,
-        lowerAngle: Math.min(this.rest, this.up),
-        upperAngle: Math.max(this.rest, this.up),
+        // Limits are measured relative to the spawn angle (planck reference
+        // angle), so express them as the deviation from rest toward "up".
+        lowerAngle: Math.min(0, this.up - this.rest),
+        upperAngle: Math.max(0, this.up - this.rest),
         enableMotor: true,
         motorSpeed: 0,
         maxMotorTorque: FLIPPER_TORQUE
@@ -68,12 +70,14 @@ export class Flipper {
   release() {
     if (!this.pressed) return;
     this.pressed = false;
-    this.joint.setMotorSpeed(0);
+    // Motor back toward rest so the flipper actually falls instead of
+    // freezing in place (motorSpeed 0 would lock the current angle).
+    this.joint.setMotorSpeed(this.side === 'L' ? FLIPPER_RETURN : -FLIPPER_RETURN);
   }
 
   forceDown() {
     this.pressed = false;
-    this.joint.setMotorSpeed(0);
+    this.joint.setMotorSpeed(this.side === 'L' ? FLIPPER_RETURN : -FLIPPER_RETURN);
   }
 }
 

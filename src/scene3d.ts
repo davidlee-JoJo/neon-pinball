@@ -13,7 +13,7 @@ import '@babylonjs/core/Culling/ray';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import * as planck from 'planck';
-import { BALL_R_U, PPU, C } from './config';
+import { BALL_R, PPU, C } from './config';
 import * as L from './layout';
 import type { Table } from './table';
 import type { Flipper } from './entities';
@@ -570,9 +570,10 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<Scene3D> {
   ballGlow.intensity = 0;
   ballGlow.range = 2.6;
 
-  const protoBall = MeshBuilder.CreateSphere('ballP', { diameter: BALL_R_U * 2 * S, segments: 20 }, scene);
+  const protoBall = MeshBuilder.CreateSphere('ballP', { diameter: (BALL_R * 2) / S, segments: 20 }, scene);
   protoBall.material = matBall;
   shadow.addShadowCaster(protoBall);
+  protoBall.setEnabled(false);
   const ballPool: Mesh[] = [];
   const ballMap = new Map<planck.Body, Mesh>();
   const makeBallMesh = () => {
@@ -670,7 +671,7 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<Scene3D> {
           ballMap.set(b.body, m);
         }
         const p = b.body.getPosition();
-        m.position.set(p.x * PPU / S - 240 / S, BALL_R_U, p.y * PPU / S - 450 / S);
+        m.position.set(p.x * PPU / S - 240 / S, BALL_R / S, p.y * PPU / S - 450 / S);
       }
       for (const [body, m] of [...ballMap]) {
         if (!seen.has(body)) {
@@ -700,8 +701,8 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<Scene3D> {
       if (!active) ballGlow.intensity = 0;
 
       const sx = shake.ox();
-      camera.position.set(camBase.pos.x + px * 0.34 + sx, camBase.pos.y, camBase.pos.z);
-      camera.setTarget(new Vector3(camBase.tgt.x + px * 0.13 + sx, camBase.tgt.y, camBase.tgt.z));
+      camera.position.set(camBase.pos.x + sx, camBase.pos.y, camBase.pos.z);
+      camera.setTarget(new Vector3(camBase.tgt.x + sx, camBase.tgt.y, camBase.tgt.z));
 
       dmdCtx.drawImage(dmd.canvas, 0, 0);
       dmdTex.update(true);

@@ -15,6 +15,7 @@ export const WALL_RESTITUTION = 0.32;
 export const WALL_FRICTION = 0.02;
 
 export const FLIPPER_SPEED = 26;
+export const FLIPPER_RETURN = 14;
 export const FLIPPER_TORQUE = 2600;
 export const FLIPPER_REST = 0.52;
 export const FLIPPER_UP = -0.62;
