@@ -79,8 +79,14 @@ export function bindInput(game: Game, scene3d: Scene3D, muteBtn: HTMLButtonEleme
     sfx.flipper();
     game.pressFlipper('R');
   };
-  for (const k of ['ArrowLeft', 'KeyZ', 'KeyA']) keys[k] = flipLDown;
-  for (const k of ['ArrowRight', 'Slash', 'KeyD']) keys[k] = flipRDown;
+  for (const k of ['ArrowLeft', 'KeyZ', 'KeyA']) {
+    keys[k] = flipLDown;
+    upKeys[k] = () => game.releaseFlipper('L');
+  }
+  for (const k of ['ArrowRight', 'Slash', 'KeyD']) {
+    keys[k] = flipRDown;
+    upKeys[k] = () => game.releaseFlipper('R');
+  }
   for (const k of ['Space', 'Enter']) {
     keys[k] = launchDown;
     upKeys[k] = launchUp;
@@ -117,6 +123,12 @@ export function bindInput(game: Game, scene3d: Scene3D, muteBtn: HTMLButtonEleme
 
   window.addEventListener('contextmenu', (e) => {
     if ((e.target as HTMLElement).closest('#deck')) e.preventDefault();
+  });
+
+  window.addEventListener('blur', () => {
+    game.releaseFlipper('L');
+    game.releaseFlipper('R');
+    game.releaseCharge();
   });
 
   void scene3d;
